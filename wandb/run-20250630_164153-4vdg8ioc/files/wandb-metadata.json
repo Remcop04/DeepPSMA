@@ -1,0 +1,78 @@
+{
+  "os": "Linux-4.18.0-553.51.1.el8_10.x86_64-x86_64-with-glibc2.28",
+  "python": "CPython 3.9.5",
+  "startedAt": "2025-06-30T14:41:53.829868Z",
+  "program": "/home3/p321870/jobs/deepPSMAchallenge/code/main.py",
+  "codePath": "main.py",
+  "email": "remcopoelarends@live.nl",
+  "root": "/home3/p321870/jobs/deepPSMAchallenge/code",
+  "host": "v100v2gpu19",
+  "executable": "/cvmfs/hpc.rug.nl/versions/2023.01/rocky8/x86_64/intel/skylake_avx512/software/Python/3.9.5-GCCcore-10.3.0/bin/python",
+  "codePathLocal": "main.py",
+  "cpu_count": 36,
+  "cpu_count_logical": 36,
+  "gpu": "Tesla V100-PCIE-32GB",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "238819475456",
+      "used": "44371623936"
+    }
+  },
+  "memory": {
+    "total": "810223747072"
+  },
+  "cpu": {
+    "count": 36,
+    "countLogical": 36
+  },
+  "gpu_nvidia": [
+    {
+      "name": "Tesla V100-PCIE-32GB",
+      "memoryTotal": "34359738368",
+      "cudaCores": 5120,
+      "architecture": "Volta",
+      "uuid": "GPU-0ed83b49-0e5e-b8ed-292c-a2c9a5c39f49"
+    }
+  ],
+  "slurm": {
+    "cluster_name": "habrok",
+    "conf": "/var/spool/slurmd/conf-cache/slurm.conf",
+    "cpus_on_node": "8",
+    "export_env": "ALL",
+    "get_user_env": "1",
+    "gpus_on_node": "1",
+    "gpus_per_node": "v100:1",
+    "gtids": "0",
+    "job_account": "users",
+    "job_cpus_per_node": "8",
+    "job_end_time": "1751295239",
+    "job_gid": "10321870",
+    "job_gpus": "0",
+    "job_id": "18079692",
+    "job_name": "deepPSMA",
+    "job_nodelist": "v100v2gpu19",
+    "job_num_nodes": "1",
+    "job_partition": "gpushort",
+    "job_qos": "normal",
+    "job_start_time": "1751294339",
+    "job_uid": "10321870",
+    "job_user": "p321870",
+    "jobid": "18079692",
+    "localid": "0",
+    "mem_per_node": "32768",
+    "nnodes": "1",
+    "nodeid": "0",
+    "nodelist": "v100v2gpu19",
+    "prio_process": "0",
+    "procid": "0",
+    "script_context": "prolog_task",
+    "submit_dir": "/home3/p321870/jobs/deepPSMAchallenge/code",
+    "submit_host": "l40sgpu2",
+    "task_pid": "1309862",
+    "tasks_per_node": "8",
+    "topology_addr": "gpu_v100_bm.v100v2gpu19",
+    "topology_addr_pattern": "switch.node"
+  },
+  "cudaVersion": "12.6"
+}
