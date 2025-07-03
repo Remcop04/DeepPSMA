@@ -22,13 +22,13 @@ class SensitivityDiceLoss(torch.nn.Module):
         self.smooth = smooth
 
     def forward(self, y_pred, y_true):
-        y_pred = F.sigmoid(y_pred, dim=1)
+        y_pred = F.sigmoid(y_pred)
 
         # Ensure y_true is long and shape [B, H, W, D]
         if y_true.dim() == 5 and y_true.shape[1] == 1:
             y_true = y_true.squeeze(1)
 
-        y_true_onehot = F.one_hot(y_true, num_classes=y_pred.shape[1]).permute(0, 4, 1, 2, 3).float()
+        y_true_onehot = F.one_hot(y_true.long(), num_classes=y_pred.shape[1]).permute(0, 4, 1, 2, 3).float()
 
         sensitivity_loss = 0.0
         dice_loss = 0.0
@@ -271,9 +271,9 @@ def train(cfg, model, train_loader, val_loader, device, run):
         run.log({
             "epoch_val_loss": avg_val_loss,
             "epoch_val_dice_class1_vs_rest": avg_dice,
-            "epoch": epoch + 1
+            "epoch": epoch + 1,
             "epoch_val_dice": avg_dice,
-            "epoch_val_sensitivity": avg_sensitivity
+            "epoch_val_sensitivity": avg_sensitivity,
         })
 
         scheduler.step(avg_dice)
