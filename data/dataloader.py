@@ -1,4 +1,6 @@
 import os
+import json
+
 from monai.data import PersistentDataset, Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 from data.transforms import get_deterministic_transforms, get_random_transforms
@@ -6,15 +8,15 @@ from data.transforms import get_deterministic_transforms, get_random_transforms
 def build_dict_petct(data_path, tracer):
     pt_folders = sorted([f for f in os.listdir(data_path) if os.path.isdir(os.path.join(data_path, f))])
     dicts = []
-
     for folder in pt_folders:
         scan_path = os.path.join(data_path, folder, tracer)
         mask_path = os.path.join(scan_path, "TTB.nii.gz")
         ct_path = os.path.join(scan_path, "CT.nii.gz")
         pet_path = os.path.join(scan_path, "PET.nii.gz")
         totseg_path = os.path.join(scan_path, "totseg_24.nii.gz")
+        threshold_path = os.path.join(scan_path, "threshold.json")
         if os.path.exists(ct_path) and os.path.exists(pet_path) and os.path.exists(mask_path):
-            dicts.append({'pet': pet_path, 'ct': ct_path, 'mask': mask_path, 'totseg': totseg_path})
+            dicts.append({'pet': pet_path, 'ct': ct_path, 'mask': mask_path, 'totseg': totseg_path, 'threshold': threshold_path})
     return dicts
 
 def get_dataloaders(cfg):

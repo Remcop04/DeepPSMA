@@ -8,6 +8,7 @@ from monai.transforms import Activations, AsDiscrete
 from monai.utils import MetricReduction
 from torchinfo import summary
 
+import wandb
 import time
 import json
 
@@ -34,7 +35,8 @@ def log_config(run, cfg, loss_function, optimizer):
 def train(cfg, model, train_loader, val_loader, device, run):
 
     # === SETUP ===
-    loss_function = DiceCELoss(to_onehot_y=False, sigmoid=True, lambda_dice=2.0, lambda_ce=0.5) #DiceLoss(to_onehot_y=False, sigmoid=True)
+#    weights = torch.tensor([0.45, 0.2]).to(device) #torch.tensor([0.1, 0.45, 0.2]).to(device)
+    loss_function = DiceCELoss(to_onehot_y=True, softmax=True, lambda_dice=0.8, lambda_ce=0.2, include_background=False)#, weight=weights) #DiceLoss(to_onehot_y=False, sigmoid=True)
     optimizer = optim.Adam(model.parameters(), lr=cfg["lr"])
     scaler = GradScaler()
 
@@ -49,10 +51,6 @@ def train(cfg, model, train_loader, val_loader, device, run):
     # Log info bij start
     log_config(run, cfg, loss_function, optimizer)
     log_model(run, model, device, example_input_size=(1, 2) + cfg["image_size"])
-
-    post_pred = Activations(sigmoid=True)
-    post_label = AsDiscrete(threshold=0.5)
-    dice_metric = DiceMetric(include_background=False, reduction=MetricReduction.MEAN)  # adviezen toegepast
 
     best_val_dice = -1.0
 
@@ -112,11 +110,11 @@ def train(cfg, model, train_loader, val_loader, device, run):
 
         # === VALIDATION ===
         model.eval()
-        dice_metric.reset()
         val_loss = 0.0
 
         with torch.no_grad():
-            for val_batch in val_loader:
+            dice_metric_bin = DiceMetric(include_background=False, reduction=MetricReduction.MEAN)
+            for val_batch_idx, val_batch in enumerate(val_loader):
                 pet = val_batch["pet"].to(device)
                 ct = val_batch["ct"].to(device)
                 labels = val_batch["mask"].to(device)
@@ -133,49 +131,46 @@ def train(cfg, model, train_loader, val_loader, device, run):
                     loss = loss_function(outputs, labels)
                     val_loss += loss.item()
 
-                    preds = post_pred(outputs)
-                    labels_post = post_label(labels)
-                    dice_metric(preds, labels_post)
+                    # Maak binair masker klasse 1 vs rest
+                    preds_binary = (torch.argmax(outputs, dim=1) == 1).to(torch.float32).unsqueeze(1)  # [B,1,H,W,D]
+                    labels_binary = (labels == 1).to(torch.float32)
+        
+                    dice_metric_bin(preds_binary, labels_binary)
 
-        # === LOGGEN VAN VOORSPELLINGEN NAAR WANDB ===
-        if batch_idx == 0:  # Alleen van eerste batch
-            max_slices = 5  # log max 3 slices
-            images_to_log = []
+                # === LOGGEN VAN VOORSPELLINGEN NAAR WANDB ===
+                max_slices = 5
+                label_sums = []
+                slice_indices = []
+                for j in range(pet.shape[0]):
+                    center_slice = pet[j, 0].shape[2] // 2
+                    label_slice = (labels[j] == 1).float()[0, :, :, center_slice]  # [C,H,W,D]
+                    label_sum = torch.sum(label_slice).item()
+                    label_sums.append(label_sum)
+                    slice_indices.append((j, center_slice))
 
-            for j in range(min(pet.shape[0], max_slices)):
-                # Kies centrale slice
-                center_slice = pet[j, 0].shape[2] // 2
+                # Sorteer en pak top-n
+                top_indices = [idx for _, idx in sorted(zip(label_sums, slice_indices), reverse=True) if _ > 0][:max_slices]
 
-                pet_slice = pet[j, 0, :, :, center_slice].detach().cpu()
-                ct_slice = ct[j, 0, :, :, center_slice].detach().cpu()
-                label_slice = labels[j, 0, :, :, center_slice].detach().cpu()
-                pred_slice = preds[j, 0, :, :, center_slice].detach().cpu()
+                for (j, s) in top_indices:
+                    label_slice = (labels[j] == 1).float().squeeze(0)[:, :, center_slice]  # shape: [H, W]
+                    pet_slice = pet[j, 0, :, :, center_slice].detach().cpu()               # shape: [H, W]
+                    pred_slice = torch.argmax(outputs, dim=1)[j, :, :, center_slice].detach().cpu()  # shape: [H, W]
 
-                image = wandb.Image(
-                    pet_slice,
-                    caption=f"Epoch {epoch+1} | Sample {j+1} | PET\nGT (red) / Pred (green)",
-                    masks={
-                        "ground_truth": {
-                            "mask_data": label_slice,
-                            "class_labels": {1: "Lesion"},
-                        },
-                        "prediction": {
-                            "mask_data": pred_slice > 0.5,
-                            "class_labels": {1: "Pred"},
-                        },
-                    }
-                )
-                images_to_log.append(image)
-
-            run.log({f"val_samples_epoch_{epoch+1}": images_to_log})
-
+                    run.log({
+                        f"val/pet_top_sample{j}": wandb.Image(pet_slice.cpu(), caption="PET"),
+                        f"val/gt_class1_top_sample{j}": wandb.Image(label_slice.cpu(), caption="GT"),
+                        f"val/pred_top_sample{j}": wandb.Image(pred_slice.cpu(), caption="Pred"),
+                    })
+                        
         avg_val_loss = val_loss / len(val_loader)
-        avg_dice = dice_metric.aggregate().item()
-        print(f"[Epoch {epoch+1}] Val Loss: {avg_val_loss:.4f} | Dice: {avg_dice:.4f}")
+        avg_dice = dice_metric_bin.aggregate().item()
+        dice_metric_bin.reset()
+        
+        print(f"[Epoch {epoch+1}] Val Loss: {avg_val_loss:.4f} | Dice class 1 vs rest: {avg_dice:.4f}")
 
         run.log({
             "epoch_val_loss": avg_val_loss,
-            "epoch_val_dice": avg_dice,
+            "epoch_val_dice_class1_vs_rest": avg_dice,
             "epoch": epoch + 1
         })
 

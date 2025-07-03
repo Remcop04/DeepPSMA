@@ -1,14 +1,48 @@
-import monai
+from monai.transforms import MapTransform
 from torch import float32
+
+import torch
+import numpy as np
+import monai
+import json
+
+class ConvertToMultiClassLabel(MapTransform):
+    def __init__(self, keys, mask_key='mask', pet_key='pet', threshold_key='threshold'):
+        super().__init__(keys)
+        self.mask_key = mask_key
+        self.pet_key = pet_key
+        self.threshold_key = threshold_key
+
+    def __call__(self, data):
+        d = dict(data)
+        mask_array = d[self.mask_key]
+        pet_array = d[self.pet_key]
+        with open(d[self.threshold_key],'r') as f:
+            threshold = json.load(f)['suv_threshold']
+
+        multiclass_label = np.zeros(mask_array.shape, dtype=np.uint8)
+        multiclass_label[mask_array > 0] = 1  # metastase
+        multiclass_label[np.logical_and(pet_array >= threshold, mask_array == 0)] = 2  # fysiologisch
+
+        # Maak nieuwe MetaTensor aan, kopieer metadata van origineel mask
+        if isinstance(mask_array, MetaTensor):
+            new_label = MetaTensor(multiclass_label, affine=mask_array.affine)
+        else:
+            new_label = multiclass_label  # fallback, kan ook np.ndarray zijn
+
+        d[self.mask_key] = new_label
+
+        return d
 
 def get_deterministic_transforms(cfg):
     return monai.transforms.Compose([
       monai.transforms.LoadImaged(keys=['pet', 'ct', 'totseg', 'mask'], image_only=False),
       monai.transforms.EnsureChannelFirstd(keys=['pet', 'ct', 'totseg', 'mask'], channel_dim="no_channel"),
       monai.transforms.Orientationd(keys=["pet", "ct", 'totseg', "mask"], axcodes='RAS'),
+      ConvertToMultiClassLabel(keys=['mask', 'pet', 'threshold']),
       monai.transforms.Spacingd(keys=['pet', 'mask'], pixdim=(3.0, 3.0, 3.0), mode=('bilinear', 'nearest')),
       monai.transforms.ResampleToMatchd(keys=['ct', 'totseg'], key_dst='pet', mode=('bilinear', 'nearest')),
-      monai.transforms.CastToTyped(keys=['pet', 'ct'], dtype=float32),
+      monai.transforms.CastToTyped(keys=['pet', 'ct'], dtype=torch.float32),
       #monai.transforms.Flipd(keys=["pet", "ct", 'totseg', "mask"], spatial_axis=0),
       monai.transforms.ScaleIntensityRanged(keys=['pet'], a_min=0, a_max=50, b_min=0.0, b_max=1.0, clip=True),
       monai.transforms.ScaleIntensityRanged(keys=['ct'], a_min=-200, a_max=1000, b_min=0.0, b_max=1.0, clip=True),
