@@ -5,7 +5,7 @@ from torch import optim
 from torch.amp import GradScaler
 from monai.losses import DiceLoss, DiceCELoss
 from monai.inferers import sliding_window_inference
-from monai.metrics import DiceMetric
+from monai.metrics import DiceMetric, ConfusionMatrixMetric
 from monai.transforms import Activations, AsDiscrete
 from monai.utils import MetricReduction
 from torchinfo import summary
@@ -56,22 +56,6 @@ class SensitivityDiceLoss(torch.nn.Module):
         total_loss = self.weight_sensitivity * sensitivity_loss + self.weight_dice * dice_loss
         return total_loss
 
-def compute_dice(y_pred, y_true, smooth=1e-6):
-    y_pred = torch.sigmoid(y_pred)
-    y_pred_bin = (y_pred > 0.5).float()
-    intersection = (y_true * y_pred_bin).sum()
-    union = y_true.sum() + y_pred_bin.sum()
-    dice = (2 * intersection + smooth) / (union + smooth)
-    return dice.item()
-
-def compute_sensitivity(y_pred, y_true, smooth=1e-6):
-    y_pred = torch.sigmoid(y_pred)
-    y_pred_bin = (y_pred > 0.5).float()
-    true_positives = (y_true * y_pred_bin).sum()
-    false_negatives = (y_true * (1 - y_pred_bin)).sum()
-    sensitivity = true_positives / (true_positives + false_negatives + smooth)
-    return sensitivity.item()
-
 def log_model(run, model, device, example_input_size=(2, 128, 128, 128)):
     try:
         # Gedetailleerde laag-per-laag summary via torchinfo
@@ -95,8 +79,9 @@ def log_config(run, cfg, loss_function, optimizer):
 def train(cfg, model, train_loader, val_loader, device, run):
 
     # === SETUP ===
-    #loss_function = DiceCELoss(to_onehot_y=True, softmax=True, lambda_dice=0.8, lambda_ce=0.2)
-    loss_function = SensitivityDiceLoss(weight_sensitivity=0.9, weight_dice=0.1)
+    #loss_function = DiceLoss(to_onehot_y=True, softmax=True)
+    loss_function = DiceCELoss(to_onehot_y=True, softmax=True, lambda_dice=0.8, lambda_ce=0.2)
+    #loss_function = SensitivityDiceLoss(weight_sensitivity=0.9, weight_dice=0.1)
     optimizer = optim.Adam(model.parameters(), lr=cfg["lr"])
     scaler = GradScaler()
 
@@ -114,12 +99,14 @@ def train(cfg, model, train_loader, val_loader, device, run):
 
     best_val_dice = -1.0
 
+    dice_metric_bin_train = DiceMetric(include_background=False, reduction=MetricReduction.MEAN)
+    sens_metric_bin_train = ConfusionMatrixMetric(include_background=False, metric_name='sensitivity', reduction=MetricReduction.MEAN)
+
+
     for epoch in range(cfg["epochs"]):
         model.train()
         torch.cuda.reset_peak_memory_stats(device)
         epoch_loss = 0.0
-        total_dice = 0.0
-        total_sensitivity = 0.0
         num_batches = 0
 
         for batch_idx, batch in enumerate(train_loader):
@@ -165,19 +152,18 @@ def train(cfg, model, train_loader, val_loader, device, run):
                 })
 
             # outputs: [B, C, H, W, D]
-            y_pred_class1 = outputs[:, 1:2]  # Sigmoid gebeurt in functie
-            y_true_class1 = (labels == 1).float().unsqueeze(1)
+            preds = torch.argmax(outputs, dim=1)
+            y_pred_class1 = (preds == 1).to(torch.float32).unsqueeze(1)
+            y_true_class1 = (labels == 1).to(torch.float32)
             
-            dice = compute_dice(y_pred_class1, y_true_class1)
-            sensitivity = compute_sensitivity(y_pred_class1, y_true_class1)
+            dice_metric_bin_train(y_pred_class1, y_true_class1)
+            sens_metric_bin_train(y_pred_class1, y_true_class1)
             
-            total_dice += dice
-            total_sensitivity += sensitivity
             num_batches += 1
 
         avg_train_loss = epoch_loss / len(train_loader)
-        avg_dice = total_dice / num_batches
-        avg_sensitivity = total_sensitivity / num_batches
+        avg_dice = dice_metric_bin_train.aggregate().item()
+        avg_sensitivity = sens_metric_bin_train.aggregate()[0].item()
         print(f"[Epoch {epoch+1}] Train Loss: {avg_train_loss:.4f}")
         run.log({
                 "epoch_train_loss": avg_train_loss,
@@ -185,16 +171,17 @@ def train(cfg, model, train_loader, val_loader, device, run):
                 "epoch_train_dice": avg_dice,
                 "epoch_train_sensitivity": avg_sensitivity})
 
+        dice_metric_bin_train.reset()
+        sens_metric_bin_train.reset()
         peak_allocated = torch.cuda.max_memory_allocated(device) / (1024 ** 3)
         run.log({"gpu_mem_peak_allocated_GB": peak_allocated})
 
         # === VALIDATION ===
-        model.eval()
+        model.eval() #collate_fn=pad_list_data_collate
         val_loss = 0.0
-        total_dice = 0.0
-        total_sensitivity = 0.0
         with torch.no_grad():
-            dice_metric_bin = DiceMetric(include_background=False, reduction=MetricReduction.MEAN)
+            dice_metric_bin_val = DiceMetric(include_background=False, reduction=MetricReduction.MEAN)
+            sens_metric_bin_val = ConfusionMatrixMetric(include_background=False, metric_name='sensitivity', reduction=MetricReduction.MEAN)
             for val_batch_idx, val_batch in enumerate(val_loader):
                 pet = val_batch["pet"].to(device)
                 ct = val_batch["ct"].to(device)
@@ -212,20 +199,14 @@ def train(cfg, model, train_loader, val_loader, device, run):
                     loss = loss_function(outputs, labels)
                     val_loss += loss.item()
 
-                    y_pred_class1 = outputs[:, 1:2]  # Sigmoid gebeurt in functie
-                    y_true_class1 = (labels == 1).float().unsqueeze(1)
+                    preds = torch.argmax(outputs, dim=1)
+                    y_pred_class1 = (preds == 1).to(torch.float32).unsqueeze(1)
+                    y_true_class1 = (labels == 1).to(torch.float32)
 
-                    dice = compute_dice(y_pred_class1, y_true_class1)
-                    sensitivity = compute_sensitivity(y_pred_class1, y_true_class1)
-                    
-                    total_dice += dice
-                    total_sensitivity += sensitivity
                     num_batches += 1
 
-                    ## Maak binair masker klasse 1 vs rest
-                    #preds_binary = (torch.argmax(outputs, dim=1) == 1).to(torch.float32).unsqueeze(1)  # [B,1,H,W,D]
-                    #labels_binary = (labels == 1).to(torch.float32)
-                    #dice_metric_bin(preds_binary, labels_binary)
+                    dice_metric_bin_val(y_pred_class1, y_true_class1)
+                    sens_metric_bin_val(y_pred_class1, y_true_class1)
 
                 # === LOGGEN VAN VOORSPELLINGEN NAAR WANDB ===
                 max_slices = 5
@@ -253,18 +234,10 @@ def train(cfg, model, train_loader, val_loader, device, run):
                     })
                         
         avg_val_loss = val_loss / len(val_loader)
-        #avg_dice = dice_metric_bin.aggregate().item()
-        dice_metric_bin.reset()
-
-        avg_dice = total_dice / num_batches
-        avg_sensitivity = total_sensitivity / num_batches
-        print(f"[Epoch {epoch+1}] Train Loss: {avg_train_loss:.4f}")
-        run.log({
-                "epoch_train_loss": avg_train_loss,
-                "epoch": epoch + 1,
-                "epoch_train_dice": avg_dice,
-                "epoch_train_sensitivity": avg_sensitivity})
-        
+        avg_dice = dice_metric_bin_val.aggregate().item()
+        avg_sensitivity = sens_metric_bin_val.aggregate()[0].item()
+        dice_metric_bin_val.reset()
+        sens_metric_bin_val.reset()        
         
         print(f"[Epoch {epoch+1}] Val Loss: {avg_val_loss:.4f} | Dice class 1 vs rest: {avg_dice:.4f}")
 

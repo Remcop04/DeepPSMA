@@ -12,7 +12,7 @@ cfg = {
     "num_workers": 2,
     "wandb": {
         "project": "monai-petct-segmentation",
-        "name": "Sensitivity-Dice loss (0.1, 0.9)",
+        "name": "Probeersel (bug fix)",
         "key": "637c41502e1a526172e998d0147681f4b3290999"
     }
 }
