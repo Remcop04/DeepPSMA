@@ -1,6 +1,7 @@
 cfg = {
     "data_path": "/scratch/p321870/deepPSMAchallenge/dataset/",
-    "cache_dir": "/tmp/cache_dir",
+    "PSMA_cache_dir": "/tmp/PSMA_cache_dir",
+    "FDG_cache_dir": "/tmp/FDG_cache_dir",
     "tracer": "PSMA",
     "batch_size": 4,
     "epochs": 300,

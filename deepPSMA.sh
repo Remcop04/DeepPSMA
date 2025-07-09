@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=deepPSMA
-#SBATCH --time=10:00:00
+#SBATCH --time=00:15:00
 #SBATCH --nodes=1
-#SBATCH --gpus-per-node=a100:1
+#SBATCH --gpus-per-node=v100:1
 #SBATCH --mem=32G
 
 # Modules en env
@@ -16,7 +16,7 @@ echo "[INFO] Modules geladen en packages geïnstalleerd."
 
 # Dataset en cache klaarmaken op TMPDIR
 mkdir -p $TMPDIR/cache_dir
-cp -r /scratch/p321870/deepPSMAchallenge/code/cache_dir_3mm/* $TMPDIR/cache_dir/
+cp -r /scratch/p321870/deepPSMAchallenge/code/cache_data_PSMA/* $TMPDIR/PSMA_cache_dir/
 
 echo "[INFO] Dataset en cache gekopieerd naar TMPDIR."
 

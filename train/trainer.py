@@ -102,7 +102,7 @@ def train(cfg, model, train_loader, val_loader, device, run):
     dice_metric_bin_train = DiceMetric(include_background=False, reduction=MetricReduction.MEAN)
     sens_metric_bin_train = ConfusionMatrixMetric(include_background=False, metric_name='sensitivity', reduction=MetricReduction.MEAN)
 
-
+    tracer = cfg['tracer']
     for epoch in range(cfg["epochs"]):
         model.train()
         torch.cuda.reset_peak_memory_stats(device)
@@ -111,7 +111,7 @@ def train(cfg, model, train_loader, val_loader, device, run):
 
         for batch_idx, batch in enumerate(train_loader):
             start_time = time.time()
-
+            
             pet = batch["pet"].to(device)
             ct = batch["ct"].to(device)
             labels = batch["mask"].to(device)
