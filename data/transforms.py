@@ -61,11 +61,11 @@ class ApplySUVthreshold(MapTransform):
 
     def __call__(self, data):
         d = dict(data)
-        pet_array = d[self.pet_key]
+        
         with open(d[self.threshold_key],'r') as f:
             threshold = json.load(f)['suv_threshold']
-
-        pet_array[pet_array < threshold] = 0
+        pet_array = d[self.pet_key]
+        d[self.pet_key][pet_array < threshold] = 0
 
         return d
 
@@ -79,6 +79,7 @@ class MaskOrgansOutd(MapTransform):
             self.organs_to_mask = [1, 2, 3, 4, 18, 19, 20, 21]
         else:
             self.organs_to_mask = [1, 2, 3, 4, 18, 19, 20, 21, 90] # Also remove brain
+    
     def __call__(self, data):
         d = dict(data)
         pet = d[self.pet_key]
@@ -88,8 +89,11 @@ class MaskOrgansOutd(MapTransform):
             mask = seg == organ
             pet[mask] = 0
 
+            
+        pet[pet > 0] = 1
         d[self.pet_key] = pet
-        return d    
+        
+        return d      
 
 def get_deterministic_transforms():
    return monai.transforms.Compose([
@@ -112,7 +116,7 @@ def get_deterministic_transforms():
 def get_random_transforms():
    return monai.transforms.Compose([
      monai.transforms.RandAffined(keys=['pet', 'pet_copy', 'ct', 'totseg', 'mask'], prob=0.5, rotate_range=(0.1, 0.1, 0.1), scale_range=(0.1, 0.1, 0.1),
-     translate_range=(10, 10, 10), padding_mode='border', mode=('bilinear', 'bilinear', 'bilinear', 'nearest', 'nearest')),
+     translate_range=(10, 10, 10), padding_mode='border', mode=('bilinear', 'nearest', 'bilinear', 'nearest', 'nearest')),
      monai.transforms.RandGaussianNoised(keys=["pet", "ct"], prob=0.3, mean=0.0, std=0.05),
      monai.transforms.RandShiftIntensityd(keys=["pet"], offsets=0.1, prob=0.5),
      monai.transforms.RandScaleIntensityd(keys=["pet"], factors=0.1, prob=0.5),
@@ -122,3 +126,64 @@ def get_random_transforms():
      #monai.transforms.RandSpatialCropd(keys=['pet', 'ct', 'totseg', 'mask'], roi_size=(128, 128, 128), random_center=True, random_size=False),
      monai.transforms.RandCropByPosNegLabeld(keys=["ct", "pet", 'pet_copy', 'totseg', "mask"], label_key="mask", spatial_size=(128, 128, 128), pos=0.8, neg=0.2, num_samples=4, image_key="pet")
 ])
+
+# from monai.transforms import Compose, LoadImaged, EnsureChannelFirstd, Orientationd, Spacingd, ResampleToMatchd, CastToTyped, CopyItemsd, ScaleIntensityRanged, EnsureTyped, RandAffined, RandGaussianNoised, RandShiftIntensityd, RandScaleIntensityd, RandBiasFieldd, SpatialPadd, RandCropByPosNegLabeld
+
+
+# def get_transforms(cfg):
+#   # ---------- Configuratie ----------
+#   base_keys = ['pet', 'ct', 'totseg', 'mask']
+#   prefixes = ['PSMA_', 'FDG_']
+  
+#   # ---------- Hulpfunctie ----------
+#   def prefixed_keys(keys, prefix):
+#       return [prefix + k for k in keys]
+  
+#   # ---------- Bouwen van transform pipeline ----------
+#   transforms = []
+#   random_transforms = []
+  
+#   # Loop over PSMA_ en FDG_ blokken
+#   for prefix in prefixes:
+#       keys = prefixed_keys(base_keys, prefix)
+  
+#       # Unpack voor leesbaarheid
+#       threshold_key = prefix + 'threshold'
+#       pet_key = prefix + 'pet'
+#       ct_key = prefix + 'ct'
+#       totseg_key = prefix + 'totseg'
+#       mask_key = prefix + 'mask'
+#       pet_copy_key = prefix + 'pet_copy'
+  
+#       # Laad en orienteer beelden
+#       transforms += [
+#           LoadImaged(keys=keys, image_only=False, allow_missing_keys=True),
+#           EnsureChannelFirstd(keys=keys, channel_dim="no_channel"),
+#           Orientationd(keys=keys, axcodes='RAS'),
+#           ConvertToMultiClassLabel(mask_key, pet_key, threshold_key),    
+#           Spacingd(keys=[pet_key, mask_key], pixdim=(3.0, 3.0, 3.0), mode=('bilinear', 'nearest')),
+#           ResampleToMatchd(keys=[ct_key, totseg_key], key_dst=pet_key, mode=('bilinear', 'nearest')),
+#           CastToTyped(keys=[pet_key, ct_key], dtype=torch.float32),
+#           CopyItemsd(keys=[pet_key], times=1, names=[pet_copy_key]),
+#           ApplySUVthreshold(pet_copy_key, threshold_key),
+#           ScaleIntensityRanged(keys=[pet_key, pet_copy_key], a_min=0, a_max=50, b_min=0.0, b_max=1.0, clip=True),
+#           ScaleIntensityRanged(keys=[ct_key], a_min=-200, a_max=1000, b_min=0.0, b_max=1.0, clip=True),
+#           MaskOrgansOutd(pet_key=pet_copy_key, seg_key=totseg_key),
+#           EnsureTyped(keys=[pet_key, pet_copy_key, ct_key, totseg_key, mask_key]),]
+  
+#       # Augmentaties
+#       random_transforms += [
+#           RandAffined(keys=[pet_key, pet_copy_key, ct_key, totseg_key, mask_key], prob=0.5, rotate_range=(0.1, 0.1, 0.1), scale_range=(0.1, 0.1, 0.1),
+#                       translate_range=(10, 10, 10), padding_mode='border', mode=('bilinear', 'bilinear', 'bilinear', 'nearest', 'nearest')),
+#           RandGaussianNoised(keys=[pet_key, ct_key], prob=0.3, mean=0.0, std=0.05),
+#           RandShiftIntensityd(keys=[pet_key], offsets=0.1, prob=0.5),
+#           RandScaleIntensityd(keys=[pet_key], factors=0.1, prob=0.5),
+#           RandBiasFieldd(keys=[ct_key],prob=0.3),
+#           #SpatialPadd(keys=[pet_key, ct_key, totseg_key, mask_key],spatial_size=(128, 128, 128)),
+#           RandCropByPosNegLabeld(keys=[ct_key, pet_key, pet_copy_key, totseg_key, mask_key], label_key=mask_key, image_key=pet_key, spatial_size=(128, 128, 128), pos=0.8,neg=0.2, num_samples=4)]
+      
+      
+#   # ---------- Combineer alles ----------
+#   deterministic_transform = Compose(transforms)
+#   random_transform = Compose(random_transforms)
+#   return deterministic_transform, random_transform

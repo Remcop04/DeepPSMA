@@ -13,7 +13,7 @@ cfg = {
     "num_workers": 2,
     "wandb": {
         "project": "monai-petct-segmentation",
-        "name": "Probeersel (bug fix)",
+        "name": "pet mask toevoegen aan input",
         "key": "637c41502e1a526172e998d0147681f4b3290999"
     }
 }

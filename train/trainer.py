@@ -113,9 +113,11 @@ def train(cfg, model, train_loader, val_loader, device, run):
             start_time = time.time()
             
             pet = batch["pet"].to(device)
+            pet_mask = batch["pet_copy"].to(device)
             ct = batch["ct"].to(device)
             labels = batch["mask"].to(device)
-            inputs = torch.cat([pet, ct], dim=1)
+            #inputs = torch.cat([pet, ct], dim=1)
+            inputs = torch.cat([pet, ct, pet_mask], dim=1)
 
             pos_voxels = (labels > 0).sum().item()
             total_voxels = labels.numel()
@@ -183,11 +185,14 @@ def train(cfg, model, train_loader, val_loader, device, run):
             dice_metric_bin_val = DiceMetric(include_background=False, reduction=MetricReduction.MEAN)
             sens_metric_bin_val = ConfusionMatrixMetric(include_background=False, metric_name='sensitivity', reduction=MetricReduction.MEAN)
             for val_batch_idx, val_batch in enumerate(val_loader):
+                
                 pet = val_batch["pet"].to(device)
+                pet_mask = val_batch["pet_copy"].to(device)
                 ct = val_batch["ct"].to(device)
                 labels = val_batch["mask"].to(device)
-                inputs = torch.cat([pet, ct], dim=1)
-
+                inputs = torch.cat([pet, ct, pet_mask], dim=1)
+                #inputs = torch.cat([pet, ct], dim=1)
+                
                 with torch.amp.autocast('cuda'):
                     outputs = sliding_window_inference(
                         inputs,
